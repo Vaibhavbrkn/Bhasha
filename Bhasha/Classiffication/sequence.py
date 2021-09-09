@@ -362,6 +362,3 @@ class SequenceClassification:
 
     def Eval(self):
         pass
-
-
-# ToDo : EarlyStopping and callbacks as well as base model
