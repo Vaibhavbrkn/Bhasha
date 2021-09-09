@@ -121,6 +121,7 @@ class Metrics:
         self.global_step += 1
         self.train_step += 1
         self.running_loss += loss.item()
+        local_loss = loss.item()
         self.step_loss += loss.item()
         self.running_accuracy += acc
         self.step_accuracy += acc
