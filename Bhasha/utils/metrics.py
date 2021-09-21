@@ -19,6 +19,8 @@ def save_checkpoint(save_path, model):
 def save_plot(x, y, title, xlab, ylab, save_pth, finished=False):
     colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k']
     plt.figure()
+    if len(x) == 0:
+        return
 
     if len(x) > 4:
         plt.plot(x, y, random.choice(colors))

@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader, random_split
 from dataclasses import dataclass, field
 import os
 from ..utils.metrics import Metrics
+from ..utils.args import TrainParams, ConfigParams, get_config
 from transformers import (
     BertTokenizer, BertForSequenceClassification, AutoTokenizer,
     AlbertForSequenceClassification, AlbertTokenizer,
@@ -16,6 +17,7 @@ from transformers import (
     CamembertForSequenceClassification, CamembertTokenizer,
     CanineForSequenceClassification, CanineTokenizer,
     ConvBertForSequenceClassification, ConvBertTokenizer,
+    CTRLForSequenceClassification, CTRLTokenizer,
     DebertaForSequenceClassification, DebertaTokenizer,
     DebertaV2ForSequenceClassification, DebertaV2Tokenizer,
     DistilBertForSequenceClassification, DistilBertTokenizer,
@@ -65,6 +67,7 @@ models = {
     "BigBirdPegasus": BigBirdPegasusForSequenceClassification,
     "Camembert": CamembertForSequenceClassification,
     "Canine": CanineForSequenceClassification,
+    'CTRL': CTRLForSequenceClassification,
     "ConvBert": ConvBertForSequenceClassification,
     "Deberta": DebertaForSequenceClassification,
     "DebertaV2": DebertaV2ForSequenceClassification,
@@ -108,6 +111,7 @@ tokens = {
     "camembert": CamembertTokenizer,
     "Canine": CanineTokenizer,
     "ConvBert": ConvBertTokenizer,
+    'CTRL': CTRLTokenizer,
     "Deberta": DebertaTokenizer,
     "DebertaV2": DebertaV2Tokenizer,
     "DistilBert": DistilBertTokenizer,
@@ -141,44 +145,12 @@ tokens = {
 }
 
 
-@dataclass
-class ClassificationParamsArgs:
-    batch_size: int = 1
-    val_size: float = .2
-    max_len: int = 512
-    learning_rate: float = 2e-5
-    optimizer: str = 'Adam'
-    # Learning Rate Schedule
-    lr_schedule: str = "ReduceLROnPlateau"
-    lr_step_size: int = 30
-    lr_gamma: float = 0.1
-    lr_base: float = 0.01
-    lr_max: float = 0.1
-    lr_mode: str = 'min'
-    lr_patience: int = 5
-    lr_factor: float = 0.1
-    lr_threshold: float = 1e-4
-    lr_milestones: List[int] = field(default_factory=lambda: [5, 10])
-    # Optimizer
-    betas: Tuple = (0.9, 0.999)
-    eps: float = 1e-08
-    weight_decay: float = 0
-    amsgrad: bool = False
-    momentum: float = 0
-    dampening: float = 0
-    nesterov: bool = False
-    centered: bool = False
-    alpha: float = 0.99
-    rho: float = 0.9
-    lr_decay: float = 0
-
-
-@dataclass
+@ dataclass
 class ClassificationArgs:
     pass
 
 
-@dataclass
+@ dataclass
 class BertData:
 
     text: List[str]
@@ -198,14 +170,20 @@ class BertData:
 
 
 class SequenceClassification:
-    def __init__(self, model_name, model_type, device='cuda'):
+    def __init__(self, model_name, model_type, device='cuda', config=None):
         super().__init__()
 
-        # assert model_name in list(models.keys()), "Enter correct model"
-        # assert type(model_name) == str, 'model_name must be an string'
-        # assert type(model_type) == str, 'model_type must be an string'
+        assert model_name in list(models.keys()), "Enter correct model"
+        assert type(model_name) == str, 'model_name must be an string'
+        assert type(model_type) == str, 'model_type must be an string'
         self.device = device
-        self.model = models[model_name].from_pretrained(model_type)
+        if config is not None:
+            assert type(config) == getattr(
+                ConfigParams, model_name), 'Wrong Config class'
+            config = get_config(model_name, config)
+            self.model = models[model_name](config).from_pretrained(model_type)
+        else:
+            self.model = models[model_name].from_pretrained(model_type)
         self.model.to(device)
         self.tokenizer = tokens[model_name].from_pretrained(model_type)
         self.best_loss = float('inf')
@@ -219,37 +197,35 @@ class SequenceClassification:
                               self.tokenizer, Params.max_len)
         val_data = BertData(val_texts, val_labels,
                             self.tokenizer, Params.max_len)
-
         self.train_dataloader = torch.utils.data.DataLoader(
             train_data, batch_size=Params.batch_size)
         self.val_dataloader = torch.utils.data.DataLoader(
             val_data, batch_size=Params.batch_size)
 
-    def train(self, train_texts, train_labels, epochs=3, metrics_step=10, save_path='model', Params=ClassificationParamsArgs):
+    def train(self, train_texts, train_labels, epochs=3, metrics_step=10, save_path='model', Params=TrainParams):
 
-        # print(type(train_labels))
-        # assert type(train_labels) == list, "train_labels must be a list"
-        # assert type(train_texts) == list, "train_texts must be a list"
-        # assert len(train_labels) == len(
-        #     train_texts), "train_texts and train_labels must be equal length"
-        # assert type(epochs) == int, "epcohs must be a int"
-        # assert epochs > 0, "epochs should be greater then 0"
-        # assert type(metrics_step) == int, "metrics_step must be a int"
-        # assert len(self.train_dataloader) * \
-        #     epochs > metrics_step, "metrics_step should be less then total number of steps"
-        # assert type(save_path) == str, "save_path must be an string"
+        assert type(train_labels) == list, "train_labels must be a list"
+        assert type(train_texts) == list, "train_texts must be a list"
+        assert len(train_labels) == len(
+            train_texts), "train_texts and train_labels must be equal length"
+        assert type(epochs) == int, "epcohs must be a int"
+        assert epochs > 0, "epochs should be greater then 0"
+        assert type(metrics_step) == int, "metrics_step must be a int"
+        assert type(save_path) == str, "save_path must be an string"
 
         self.train_texts = train_texts
         self.train_labels = train_labels
         self.save_path = save_path
-
         self.epochs = epochs
+
+        self.__make_data(Params)
+
+        assert len(self.train_dataloader) * \
+            epochs > metrics_step, "metrics_step should be less then total number of steps"
+
         if not os.path.isdir(save_path):
             os.mkdir(save_path)
 
-        self.__make_data(Params)
-        # optimizer = torch.optim.Adam(
-        #     self.model.parameters(), lr=Params.learning_rate)
         optimizer = Optim(Params, self.model)
         scheduler = Scheduler(Params, optimizer, len(
             self.train_dataloader), self.epochs)
@@ -317,17 +293,17 @@ class SequenceClassification:
         met.finish()
         # return self.model
 
-    def predict(self, test_texts, max_len=128, labels=None):
+    def predict(self, test_texts, max_len=128, labels=None, device='cpu'):
 
-        # assert type(test_texts) == list, "test_texts must be an list"
-        # assert type(max_len) == int, "max_len must be an int"
+        assert type(test_texts) == list, "test_texts must be an list"
+        assert type(max_len) == int, "max_len must be an int"
 
-        # if labels is not None:
+        if labels is not None:
 
-        # assert type(labels) == list, "labels must be an list"
-        # assert len(labels) == len(
-        #     test_texts), "test_texts and labels should be of equal length"
-
+            assert type(labels) == list, "labels must be an list"
+            assert len(labels) == len(
+                test_texts), "test_texts and labels should be of equal length"
+        self.model.to(device)
         answer = {}
         pbar = tqdm(enumerate(test_texts), total=len(
             test_texts), desc='Predicting')
@@ -337,7 +313,7 @@ class SequenceClassification:
                                                 pad_to_max_length=True, return_tensors="pt")
             with torch.no_grad():
                 outputs = self.model(tokens['input_ids'].to(
-                    self.device), attention_mask=tokens['attention_mask'].to(self.device)).logits
+                    device), attention_mask=tokens['attention_mask'].to(device)).logits
                 outputs = outputs.detach().cpu().numpy()
                 preds = np.argmax(outputs, axis=1)
                 if labels is not None:
@@ -357,8 +333,34 @@ class SequenceClassification:
     def deploy(self):
         pass
 
-    def convert(self):
-        pass
+    def convert(self, name=['onnx']):
+        if not os.path.isdir("{}/convert".format(self.save_path)):
+            os.mkdir("{}/convert".format(self.save_path))
+        self.model.to('cpu')
+        self.model.eval()
+        texts, labels = next(iter(self.train_dataloader))
+        input_ids = texts['input_ids'].squeeze(1)
+        attention_mask = texts['attention_mask'].squeeze(1)
+        dummy_input = (input_ids, attention_mask)
+        input_names = ["input_ids",  "attention_mask"]
+        output_names = ["output"]
+
+        if 'onnx' in name:
+            torch.onnx.export(self.model, dummy_input, "{}/convert/model.onnx".format(self.save_path),
+                              input_names=input_names, output_names=output_names, dynamic_axes={
+                                  "input_ids": {0: "batch_size"},
+                                  "attention_mask": {0: "batch_size"},
+                                  "output": {0: "batch_size"}
+            }, opset_version=11)
+
+        if 'quantized' in name:
+            quantized_model = torch.quantization.quantize_dynamic(
+                self.model, {torch.nn.Linear}, dtype=torch.qint8
+            )
+            traced_model = torch.jit.trace(
+                quantized_model, dummy_input, strict=False)
+            torch.jit.save(
+                traced_model, "{}/convert/quantized.pt".format(self.save_path))
 
     def Eval(self):
         pass
