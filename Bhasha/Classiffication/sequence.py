@@ -6,6 +6,8 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader, random_split
 from dataclasses import dataclass, field
 import os
+import gradio as gr
+import onnxruntime as onnxrt
 from ..utils.metrics import Metrics
 from ..utils.args import TrainParams, ConfigParams, get_config
 from transformers import (
@@ -295,6 +297,9 @@ class SequenceClassification:
 
     def predict(self, test_texts, max_len=128, labels=None, device='cpu'):
 
+        if type(test_texts) == str:
+            test_texts = [test_texts]
+
         assert type(test_texts) == list, "test_texts must be an list"
         assert type(max_len) == int, "max_len must be an int"
 
@@ -315,13 +320,14 @@ class SequenceClassification:
                 outputs = self.model(tokens['input_ids'].to(
                     device), attention_mask=tokens['attention_mask'].to(device)).logits
                 outputs = outputs.detach().cpu().numpy()
+                print(outputs)
                 preds = np.argmax(outputs, axis=1)
                 if labels is not None:
                     acc += 1 if labels[ind] == preds[0] else 0
                 answer[inp] = preds[0]
 
         if labels is not None:
-            print("Accuracy : {}".format(acc/len(test_texts)))
+            pass
         return answer
 
     def save_model(self, loss):
@@ -330,8 +336,52 @@ class SequenceClassification:
             self.model.save_pretrained("{}/weight".format(self.save_path))
             self.tokenizer.save_pretrained("{}/weight".format(self.save_path))
 
-    def deploy(self):
-        pass
+    def deploy(self, onnx=None, quantized=None, original=True, labels=None, max_len=512, device='cpu'):
+        outputs = gr.outputs.Label(num_top_classes=len(labels))
+        if onnx is not None:
+            def predict(inp):
+                onnx_session = onnxrt.InferenceSession(onnx)
+
+                def to_numpy(tensor):
+                    if tensor.requires_grad:
+                        return tensor.detach().cpu().numpy()
+                    return tensor.cpu().numpy()
+                tokens = self.tokenizer.encode_plus(inp, max_length=max_len,
+                                                    pad_to_max_length=True, return_tensors="pt")
+                input_ids = tokens['input_ids'].squeeze(1)
+                attention_mask = tokens['attention_mask'].squeeze(1)
+                inp = {onnx_session.get_inputs()[0].name: to_numpy(input_ids),
+                       onnx_session.get_inputs()[1].name: to_numpy(
+                           attention_mask)
+                       }
+                onnx_output = onnx_session.run(None, inp)
+                onnx_output = torch.tensor(onnx_output)
+                preds = torch.nn.functional.softmax(onnx_output, dim=2)
+                return {labels[i]: float(preds[0][0][i]) for i in range(len(labels))}
+
+        elif quantized is not None:
+            def predict(inp):
+                model = torch.jit.load(quantized)
+                tokens = self.tokenizer.encode_plus(inp, max_length=max_len,
+                                                    pad_to_max_length=True, return_tensors="pt")
+                outputs = model(tokens['input_ids'].to(
+                    device), attention_mask=tokens['attention_mask'].to(device))['logits']
+                preds = torch.nn.functional.softmax(outputs, dim=1)
+                return {labels[i]: float(preds[0][i]) for i in range(len(labels))}
+        else:
+            def predict(inp):
+                self.model.to(device)
+                tokens = self.tokenizer.encode_plus(inp, max_length=max_len,
+                                                    pad_to_max_length=True, return_tensors="pt")
+                with torch.no_grad():
+                    outputs = self.model(tokens['input_ids'].to(
+                        device), attention_mask=tokens['attention_mask'].to(device)).logits
+                    outputs = outputs.detach().cpu()
+                    preds = torch.nn.functional.softmax(outputs, dim=1)
+                    return {labels[i]: float(preds[0][i]) for i in range(len(labels))}
+
+        gr.Interface(fn=predict, inputs='textbox',
+                     outputs=outputs).launch(share=True)
 
     def convert(self, name=['onnx']):
         if not os.path.isdir("{}/convert".format(self.save_path)):
