@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 import os
 import gradio as gr
 import onnxruntime as onnxrt
+from .utils import Monitor
+import time
 from ..utils.metrics import Metrics
 from ..utils.args import TrainParams, ConfigParams, get_config
 from transformers import (
@@ -172,12 +174,15 @@ class BertData:
 
 
 class SequenceClassification:
-    def __init__(self, model_name, model_type, device='cuda', config=None):
+    def __init__(self, model_name, model_type, device='cuda', config=None, save_path='model',):
         super().__init__()
 
         assert model_name in list(models.keys()), "Enter correct model"
         assert type(model_name) == str, 'model_name must be an string'
         assert type(model_type) == str, 'model_type must be an string'
+        assert type(save_path) == str, "save_path must be an string"
+        self.model_name = model_name
+        self.model_type = model_type
         self.device = device
         if config is not None:
             assert type(config) == getattr(
@@ -189,6 +194,7 @@ class SequenceClassification:
         self.model.to(device)
         self.tokenizer = tokens[model_name].from_pretrained(model_type)
         self.best_loss = float('inf')
+        self.save_path = save_path
 
     def __make_data(self, Params):
 
@@ -204,7 +210,7 @@ class SequenceClassification:
         self.val_dataloader = torch.utils.data.DataLoader(
             val_data, batch_size=Params.batch_size)
 
-    def train(self, train_texts, train_labels, epochs=3, metrics_step=10, save_path='model', Params=TrainParams):
+    def train(self, train_texts, train_labels, epochs=3, metrics_step=10,  Params=TrainParams):
 
         assert type(train_labels) == list, "train_labels must be a list"
         assert type(train_texts) == list, "train_texts must be a list"
@@ -213,11 +219,9 @@ class SequenceClassification:
         assert type(epochs) == int, "epcohs must be a int"
         assert epochs > 0, "epochs should be greater then 0"
         assert type(metrics_step) == int, "metrics_step must be a int"
-        assert type(save_path) == str, "save_path must be an string"
 
         self.train_texts = train_texts
         self.train_labels = train_labels
-        self.save_path = save_path
         self.epochs = epochs
 
         self.__make_data(Params)
@@ -341,6 +345,8 @@ class SequenceClassification:
         if onnx is not None:
             def predict(inp):
                 onnx_session = onnxrt.InferenceSession(onnx)
+                mon = Monitor(time.time(), inp, self.model_name,
+                              self.model_type, max_len, 'onnx', self.save_path)
 
                 def to_numpy(tensor):
                     if tensor.requires_grad:
@@ -357,19 +363,25 @@ class SequenceClassification:
                 onnx_output = onnx_session.run(None, inp)
                 onnx_output = torch.tensor(onnx_output)
                 preds = torch.nn.functional.softmax(onnx_output, dim=2)
+                mon.finish(time.time(), labels[torch.argmax(preds)])
                 return {labels[i]: float(preds[0][0][i]) for i in range(len(labels))}
 
         elif quantized is not None:
             def predict(inp):
+                mon = Monitor(time.time(), inp, self.model_name,
+                              self.model_type, max_len, 'quantized', self.save_path)
                 model = torch.jit.load(quantized)
                 tokens = self.tokenizer.encode_plus(inp, max_length=max_len,
                                                     pad_to_max_length=True, return_tensors="pt")
                 outputs = model(tokens['input_ids'].to(
                     device), attention_mask=tokens['attention_mask'].to(device))['logits']
                 preds = torch.nn.functional.softmax(outputs, dim=1)
+                mon.finish(time.time(), labels[torch.argmax(preds)])
                 return {labels[i]: float(preds[0][i]) for i in range(len(labels))}
         else:
             def predict(inp):
+                mon = Monitor(time.time(), inp, self.model_name,
+                              self.model_type, max_len, 'original', self.save_path)
                 self.model.to(device)
                 tokens = self.tokenizer.encode_plus(inp, max_length=max_len,
                                                     pad_to_max_length=True, return_tensors="pt")
@@ -378,6 +390,7 @@ class SequenceClassification:
                         device), attention_mask=tokens['attention_mask'].to(device)).logits
                     outputs = outputs.detach().cpu()
                     preds = torch.nn.functional.softmax(outputs, dim=1)
+                    mon.finish(time.time(), labels[torch.argmax(preds)])
                     return {labels[i]: float(preds[0][i]) for i in range(len(labels))}
 
         gr.Interface(fn=predict, inputs='textbox',
