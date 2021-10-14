@@ -174,7 +174,7 @@ class BertData:
 
 
 class SequenceClassification:
-    def __init__(self, model_name, model_type, device='cuda', config=None, save_path='model',):
+    def __init__(self, model_name, model_type, device='cuda', config=None, save_path='model'):
         super().__init__()
 
         assert model_name in list(models.keys()), "Enter correct model"
@@ -229,14 +229,14 @@ class SequenceClassification:
         assert len(self.train_dataloader) * \
             epochs > metrics_step, "metrics_step should be less then total number of steps"
 
-        if not os.path.isdir(save_path):
-            os.mkdir(save_path)
+        if not os.path.isdir(self.save_path):
+            os.mkdir(self.save_path)
 
         optimizer = Optim(Params, self.model)
         scheduler = Scheduler(Params, optimizer, len(
             self.train_dataloader), self.epochs)
 
-        met = Metrics(epochs, metrics_step, save_path)
+        met = Metrics(epochs, metrics_step, self.save_path)
 
         for epoch in range(self.epochs):
             self.model.train()
