@@ -13,7 +13,7 @@ def Scheduler(Params, optimizer, steps, epochs):
     elif Params.lr_schedule == "CyclicLR":
         return torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=Params.lr_base, max_lr=Params.lr_max)
     elif Params.lr_schedule == "StepLR":
-        return torch.optim.StepLR(optimizer, step_size=Params.lr_step_size, gamma=Params.lr_gamma)
+        return torch.optim.lr_scheduler.StepLR(optimizer, step_size=Params.lr_step_size, gamma=Params.lr_gamma)
 
 
 def Optim(Params, model):
@@ -22,26 +22,26 @@ def Optim(Params, model):
             model.parameters(), lr=Params.learning_rate, betas=Params.betas, eps=Params.eps, weight_decay=Params.weight_decay, amsgrad=Params.amsgrad)
 
     elif Params.optimizer == 'AdamW':
-        torch.optim.AdamW(
+        return torch.optim.AdamW(
             model.parameters(), lr=Params.learning_rate, betas=Params.betas, eps=Params.eps, weight_decay=Params.weight_decay, amsgrad=Params.amsgrad)
 
     elif Params.optimizer == 'SGD':
-        torch.optim.SGD(
+        return torch.optim.SGD(
             model.parameters(), lr=Params.learning_rate, momentum=Params.momentum, dampening=Params.dampening, weight_decay=Params.weight_decay, nesterov=Params.nesterov
         )
 
     elif Params.optimizer == 'RMSprop':
-        torch.optim.RMSprop(model.parameters(), lr=Params.learning_rate, alpha=Params.alpha, eps=Params.eps,
-                            weight_decay=Params.weight_decay, momentum=Params.momentum, centered=Params.centered)
+        return torch.optim.RMSprop(model.parameters(), lr=Params.learning_rate, alpha=Params.alpha, eps=Params.eps,
+                                   weight_decay=Params.weight_decay, momentum=Params.momentum, centered=Params.centered)
 
     elif Params.optimizer == 'Adamax':
-        torch.optim.Adamax(model.parameters(), lr=Params.learning_rate,
-                           betas=Params.betas, eps=Params.eps, weight_decay=Params.weight_decay)
+        return torch.optim.Adamax(model.parameters(), lr=Params.learning_rate,
+                                  betas=Params.betas, eps=Params.eps, weight_decay=Params.weight_decay)
 
     elif Params.optimizer == 'Adadelta':
-        torch.optim.Adadelta(model.parameters(), lr=Params.learning_rate, rho=Params.rho,
-                             eps=Params.eps, weight_decay=Params.weight_decay)
+        return torch.optim.Adadelta(model.parameters(), lr=Params.learning_rate, rho=Params.rho,
+                                    eps=Params.eps, weight_decay=Params.weight_decay)
 
     elif Params.optimizer == 'Adagrad':
-        torch.optim.Adagrad(model.parameters(), lr=Params.learning_rate, lr_decay=Params.lr_decay,
-                            weight_decay=Params.weight_decay,  eps=Params.eps)
+        return torch.optim.Adagrad(model.parameters(), lr=Params.learning_rate, lr_decay=Params.lr_decay,
+                                   weight_decay=Params.weight_decay,  eps=Params.eps)

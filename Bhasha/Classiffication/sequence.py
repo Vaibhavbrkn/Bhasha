@@ -225,7 +225,6 @@ class SequenceClassification:
         self.epochs = epochs
 
         self.__make_data(Params)
-
         assert len(self.train_dataloader) * \
             epochs > metrics_step, "metrics_step should be less then total number of steps"
 
